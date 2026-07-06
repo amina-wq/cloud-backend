@@ -47,7 +47,7 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(e => e.UserId);
 
             entity.Property(e => e.UserId)
-                .HasColumnName("usersID");
+                .HasColumnName("userID");
 
             entity.Property(e => e.RoleId)
                 .HasColumnName("roleID");
@@ -144,6 +144,10 @@ public class ApplicationDbContext : DbContext
                 .HasColumnName("posterURL")
                 .HasMaxLength(500);
 
+            entity.Property(e => e.PosterS3Key)
+                .HasColumnName("posterS3Key")
+                .HasMaxLength(500);
+
             entity.Property(e => e.CategoryID)
                 .HasColumnName("categoryID");
 
@@ -228,6 +232,10 @@ public class ApplicationDbContext : DbContext
                 .HasColumnName("posterURL")
                 .HasMaxLength(500);
 
+            entity.Property(e => e.PosterS3Key)
+                .HasColumnName("posterS3Key")
+                .HasMaxLength(500);
+
             entity.Property(e => e.StartDatetime)
                 .HasColumnName("startDatetime");
 
@@ -300,6 +308,9 @@ public class ApplicationDbContext : DbContext
             entity.HasIndex(e => e.QrCode)
                 .IsUnique();
 
+            entity.HasIndex(e => new { e.EventId, e.UserId })
+                .IsUnique();
+
             entity.HasOne(e => e.Event)
                 .WithMany(e => e.Registrations)
                 .HasForeignKey(e => e.EventId)
@@ -333,6 +344,9 @@ public class ApplicationDbContext : DbContext
 
             entity.Property(e => e.CheckInDatetime)
                 .HasColumnName("checkInDatetime");
+
+            entity.HasIndex(e => e.RegistrationId)
+                .IsUnique();
 
             entity.HasOne(e => e.Registration)
                 .WithOne(e => e.Attendance)
