@@ -19,21 +19,34 @@ namespace UniversityEventManager.API.Controllers
             _context = context;
         }
 
+        // GET: api/admin/event-requests
+        // Supports:
+        // /api/admin/event-requests
+        // /api/admin/event-requests?status=pending
         [HttpGet("event-requests")]
-        public async Task<IActionResult> GetAllEventRequests()
+        public async Task<IActionResult> GetAllEventRequests([FromQuery] string? status)
         {
-            var requests = await _context.EventCreationRequests
+            var query = _context.EventCreationRequests.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(status) && status.ToLower() != "all")
+            {
+                query = query.Where(r => r.RequestStatus == status.ToLower());
+            }
+
+            var requests = await query
                 .Select(r => new
                 {
                     requestID = r.RequestID,
                     eventTitle = r.EventTitle,
-                    eventDescription = r.EventDescription,
+                    eventDescription = r.EventDescription ?? "",
                     venue = r.Venue,
-                    posterURL = r.PosterURL,
+                    posterURL = r.PosterURL ?? "",
+
                     categoryName = _context.EventCategories
                         .Where(c => c.CategoryID == r.CategoryID)
                         .Select(c => c.CategoryName)
-                        .FirstOrDefault(),
+                        .FirstOrDefault() ?? "",
+
                     proposedStartDatetime = r.ProposedStartDatetime,
                     proposedEndDatetime = r.ProposedEndDatetime,
                     requestCapacity = r.RequestCapacity,
@@ -41,59 +54,42 @@ namespace UniversityEventManager.API.Controllers
                     submittedAt = r.SubmittedAt,
                     reviewedAt = r.ReviewedAt,
                     remark = r.Remark,
+
                     submittedByName = _context.Users
                         .Where(u => u.UserID == r.SubmittedBy)
                         .Select(u => u.FullName)
-                        .FirstOrDefault()
+                        .FirstOrDefault() ?? ""
                 })
+                .OrderByDescending(r => r.submittedAt)
                 .ToListAsync();
 
             return Ok(requests);
         }
 
+        // GET: api/admin/event-requests/1
         [HttpGet("event-requests/{requestID}")]
         public async Task<IActionResult> GetEventRequestById(long requestID)
         {
-            var request = await _context.EventCreationRequests
-                .Where(r => r.RequestID == requestID)
-                .Select(r => new
-                {
-                    requestID = r.RequestID,
-                    eventTitle = r.EventTitle,
-                    eventDescription = r.EventDescription,
-                    venue = r.Venue,
-                    posterURL = r.PosterURL,
-                    categoryName = _context.EventCategories
-                        .Where(c => c.CategoryID == r.CategoryID)
-                        .Select(c => c.CategoryName)
-                        .FirstOrDefault(),
-                    proposedStartDatetime = r.ProposedStartDatetime,
-                    proposedEndDatetime = r.ProposedEndDatetime,
-                    requestCapacity = r.RequestCapacity,
-                    requestStatus = r.RequestStatus,
-                    submittedAt = r.SubmittedAt,
-                    reviewedAt = r.ReviewedAt,
-                    remark = r.Remark,
-                    submittedByName = _context.Users
-                        .Where(u => u.UserID == r.SubmittedBy)
-                        .Select(u => u.FullName)
-                        .FirstOrDefault()
-                })
-                .FirstOrDefaultAsync();
+            var request = await BuildEventRequestResponse(requestID);
 
             if (request == null)
+            {
                 return NotFound(new { message = "Event request not found" });
+            }
 
             return Ok(request);
         }
 
+        // PUT: api/admin/event-requests/1/approve
         [HttpPut("event-requests/{requestID}/approve")]
         public async Task<IActionResult> ApproveEventRequest(long requestID)
         {
             var adminIdValue = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
             if (string.IsNullOrEmpty(adminIdValue))
+            {
                 return Unauthorized(new { message = "Invalid token" });
+            }
 
             long adminId = long.Parse(adminIdValue);
 
@@ -101,16 +97,22 @@ namespace UniversityEventManager.API.Controllers
                 .FirstOrDefaultAsync(r => r.RequestID == requestID);
 
             if (request == null)
+            {
                 return NotFound(new { message = "Event request not found" });
+            }
 
             if (request.RequestStatus != "pending")
+            {
                 return BadRequest(new { message = "Only pending requests can be approved" });
+            }
 
             var eventAlreadyCreated = await _context.Events
                 .AnyAsync(e => e.CreationRequestID == request.RequestID);
 
             if (eventAlreadyCreated)
+            {
                 return BadRequest(new { message = "Event already created for this request" });
+            }
 
             request.RequestStatus = "approved";
             request.ReviewedBy = adminId;
@@ -137,23 +139,21 @@ namespace UniversityEventManager.API.Controllers
             _context.Events.Add(newEvent);
             await _context.SaveChangesAsync();
 
-            return Ok(new
-            {
-                message = "Event request approved successfully",
-                requestID = request.RequestID,
-                requestStatus = request.RequestStatus,
-                reviewedBy = request.ReviewedBy,
-                reviewedAt = request.ReviewedAt
-            });
+            var response = await BuildEventRequestResponse(requestID);
+
+            return Ok(response);
         }
 
+        // PUT: api/admin/event-requests/1/reject
         [HttpPut("event-requests/{requestID}/reject")]
         public async Task<IActionResult> RejectEventRequest(long requestID, RejectEventRequestDto dto)
         {
             var adminIdValue = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
             if (string.IsNullOrEmpty(adminIdValue))
+            {
                 return Unauthorized(new { message = "Invalid token" });
+            }
 
             long adminId = long.Parse(adminIdValue);
 
@@ -161,10 +161,14 @@ namespace UniversityEventManager.API.Controllers
                 .FirstOrDefaultAsync(r => r.RequestID == requestID);
 
             if (request == null)
+            {
                 return NotFound(new { message = "Event request not found" });
+            }
 
             if (request.RequestStatus != "pending")
+            {
                 return BadRequest(new { message = "Only pending requests can be rejected" });
+            }
 
             request.RequestStatus = "rejected";
             request.Remark = dto.Remark;
@@ -173,15 +177,44 @@ namespace UniversityEventManager.API.Controllers
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
-            {
-                message = "Event request rejected successfully",
-                requestID = request.RequestID,
-                requestStatus = request.RequestStatus,
-                remark = request.Remark,
-                reviewedBy = request.ReviewedBy,
-                reviewedAt = request.ReviewedAt
-            });
+            var response = await BuildEventRequestResponse(requestID);
+
+            return Ok(response);
+        }
+
+        private async Task<object?> BuildEventRequestResponse(long requestID)
+        {
+            var request = await _context.EventCreationRequests
+                .Where(r => r.RequestID == requestID)
+                .Select(r => new
+                {
+                    requestID = r.RequestID,
+                    eventTitle = r.EventTitle,
+                    eventDescription = r.EventDescription ?? "",
+                    venue = r.Venue,
+                    posterURL = r.PosterURL ?? "",
+
+                    categoryName = _context.EventCategories
+                        .Where(c => c.CategoryID == r.CategoryID)
+                        .Select(c => c.CategoryName)
+                        .FirstOrDefault() ?? "",
+
+                    proposedStartDatetime = r.ProposedStartDatetime,
+                    proposedEndDatetime = r.ProposedEndDatetime,
+                    requestCapacity = r.RequestCapacity,
+                    requestStatus = r.RequestStatus,
+                    submittedAt = r.SubmittedAt,
+                    reviewedAt = r.ReviewedAt,
+                    remark = r.Remark,
+
+                    submittedByName = _context.Users
+                        .Where(u => u.UserID == r.SubmittedBy)
+                        .Select(u => u.FullName)
+                        .FirstOrDefault() ?? ""
+                })
+                .FirstOrDefaultAsync();
+
+            return request;
         }
     }
 

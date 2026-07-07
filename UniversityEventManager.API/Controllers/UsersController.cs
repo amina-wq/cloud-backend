@@ -17,9 +17,7 @@ namespace UniversityEventManager.API.Controllers
             _context = context;
         }
 
-        // ============================
-        // GET /api/users/me
-        // ============================
+        // GET: api/users/me
         [Authorize]
         [HttpGet("me")]
         public async Task<IActionResult> GetCurrentUser()
@@ -27,15 +25,19 @@ namespace UniversityEventManager.API.Controllers
             var userIdValue = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
             if (string.IsNullOrEmpty(userIdValue))
+            {
                 return Unauthorized(new { message = "Invalid token" });
+            }
 
-            var userId = long.Parse(userIdValue);
+            long userId = long.Parse(userIdValue);
 
             var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.UserID == userId);
 
             if (user == null)
+            {
                 return NotFound(new { message = "User not found" });
+            }
 
             var role = await _context.Roles
                 .FirstOrDefaultAsync(r => r.RoleID == user.RoleID);
@@ -52,9 +54,7 @@ namespace UniversityEventManager.API.Controllers
             });
         }
 
-        // ============================
-        // GET /api/users/me/tickets
-        // ============================
+        // GET: api/users/me/tickets
         [Authorize]
         [HttpGet("me/tickets")]
         public async Task<IActionResult> GetMyTickets()
@@ -62,9 +62,11 @@ namespace UniversityEventManager.API.Controllers
             var userIdValue = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
             if (string.IsNullOrEmpty(userIdValue))
+            {
                 return Unauthorized(new { message = "Invalid token" });
+            }
 
-            var userId = long.Parse(userIdValue);
+            long userId = long.Parse(userIdValue);
 
             var tickets = await _context.Registrations
                 .Where(r => r.UserID == userId &&
@@ -72,10 +74,46 @@ namespace UniversityEventManager.API.Controllers
                 .Select(r => new
                 {
                     registrationID = r.RegistrationID,
-                    eventID = r.EventID,
-                    registrationDate = r.RegistrationDate,
+                    userID = r.UserID,
                     registrationStatus = r.RegistrationStatus,
-                    qrCode = r.QrCode
+                    qrCode = r.QrCode,
+
+                    attendanceStatus = _context.Attendances
+                        .Where(a => a.RegistrationID == r.RegistrationID)
+                        .Select(a => a.AttendanceStatus)
+                        .FirstOrDefault() ?? "not_checked_in",
+
+                    @event = _context.Events
+                        .Where(e => e.EventID == r.EventID)
+                        .Select(e => new
+                        {
+                            eventID = e.EventID,
+                            title = e.Title,
+                            description = e.Description ?? "",
+                            venue = e.Venue,
+                            posterURL = e.PosterURL ?? "",
+                            startDatetime = e.StartDatetime,
+                            endDatetime = e.EndDatetime,
+                            capacity = e.Capacity,
+
+                            registeredCount = _context.Registrations
+                                .Count(reg => reg.EventID == e.EventID &&
+                                              reg.RegistrationStatus == "registered"),
+
+                            availableSeats = e.Capacity - _context.Registrations
+                                .Count(reg => reg.EventID == e.EventID &&
+                                              reg.RegistrationStatus == "registered"),
+
+                            categoryName = _context.EventCategories
+                                .Where(c => c.CategoryID == e.CategoryID)
+                                .Select(c => c.CategoryName)
+                                .FirstOrDefault() ?? "",
+
+                            eventStatus = e.EventStatus,
+
+                            isRegisteredByCurrentUser = true
+                        })
+                        .FirstOrDefault()
                 })
                 .ToListAsync();
 
