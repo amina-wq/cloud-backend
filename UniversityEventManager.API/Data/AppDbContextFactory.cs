@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.Extensions.Configuration;
 
 namespace UniversityEventManager.API.Data
 {
@@ -7,14 +8,28 @@ namespace UniversityEventManager.API.Data
     {
         public AppDbContext CreateDbContext(string[] args)
         {
-            var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+            var currentDirectory = Directory.GetCurrentDirectory();
+
+            var basePath = File.Exists(Path.Combine(currentDirectory, "appsettings.json"))
+                ? currentDirectory
+                : Path.Combine(currentDirectory, "UniversityEventManager.API");
+
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(basePath)
+                .AddJsonFile("appsettings.json", optional: true)
+                .AddJsonFile("appsettings.Development.json", optional: true)
+                .AddEnvironmentVariables()
+                .Build();
 
             var connectionString =
-                "server=localhost;port=3306;database=university_event_manager;user=root;password=password;";
+                configuration.GetConnectionString("DefaultConnection")
+                ?? throw new InvalidOperationException("DefaultConnection is missing.");
+
+            var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
 
             optionsBuilder.UseMySql(
                 connectionString,
-                new MySqlServerVersion(new Version(8, 0, 36))
+                ServerVersion.AutoDetect(connectionString)
             );
 
             return new AppDbContext(optionsBuilder.Options);
