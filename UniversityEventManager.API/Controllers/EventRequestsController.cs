@@ -1,9 +1,11 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using UniversityEventManager.API.Data;
 using UniversityEventManager.API.Models;
+using UniversityEventManager.API.Services;
 
 namespace UniversityEventManager.API.Controllers
 {
@@ -13,10 +15,12 @@ namespace UniversityEventManager.API.Controllers
     public class EventRequestsController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly S3StorageService _s3StorageService;
 
-        public EventRequestsController(AppDbContext context)
+        public EventRequestsController(AppDbContext context, S3StorageService s3StorageService)
         {
             _context = context;
+            _s3StorageService = s3StorageService;
         }
 
         [HttpGet("my")]
@@ -25,7 +29,9 @@ namespace UniversityEventManager.API.Controllers
             var userIdValue = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
             if (string.IsNullOrEmpty(userIdValue))
+            {
                 return Unauthorized(new { message = "Invalid token" });
+            }
 
             long userId = long.Parse(userIdValue);
 
@@ -62,42 +68,105 @@ namespace UniversityEventManager.API.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateEventRequest(CreateEventRequestDto request)
         {
+            return await CreateEventRequestInternal(
+                request.EventTitle,
+                request.EventDescription,
+                request.Venue,
+                request.CategoryID,
+                request.ProposedStartDatetime,
+                request.ProposedEndDatetime,
+                request.RequestCapacity,
+                null
+            );
+        }
+
+        [HttpPost("with-poster")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> CreateEventRequestWithPoster([FromForm] CreateEventRequestWithPosterDto request)
+        {
+            return await CreateEventRequestInternal(
+                request.EventTitle,
+                request.EventDescription,
+                request.Venue,
+                request.CategoryID,
+                request.ProposedStartDatetime,
+                request.ProposedEndDatetime,
+                request.RequestCapacity,
+                request.PosterFile
+            );
+        }
+
+        private async Task<IActionResult> CreateEventRequestInternal(
+            string eventTitle,
+            string? eventDescription,
+            string venue,
+            long categoryID,
+            DateTime proposedStartDatetime,
+            DateTime proposedEndDatetime,
+            int requestCapacity,
+            IFormFile? posterFile)
+        {
             var userIdValue = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
             if (string.IsNullOrEmpty(userIdValue))
+            {
                 return Unauthorized(new { message = "Invalid token" });
+            }
 
             long userId = long.Parse(userIdValue);
 
-            if (request.ProposedEndDatetime <= request.ProposedStartDatetime)
+            if (proposedEndDatetime <= proposedStartDatetime)
+            {
                 return BadRequest(new { message = "End datetime must be after start datetime" });
+            }
 
-            if (request.RequestCapacity <= 0)
+            if (requestCapacity <= 0)
+            {
                 return BadRequest(new { message = "Capacity must be greater than 0" });
+            }
 
             var categoryExists = await _context.EventCategories
-                .AnyAsync(c => c.CategoryID == request.CategoryID);
+                .AnyAsync(c => c.CategoryID == categoryID);
 
             if (!categoryExists)
+            {
                 return BadRequest(new { message = "Invalid category" });
+            }
+
+            string posterUrl = "";
+            string? posterS3Key = null;
+
+            if (posterFile != null && posterFile.Length > 0)
+            {
+                try
+                {
+                    var uploadResult = await _s3StorageService.UploadEventPosterAsync(posterFile);
+                    posterUrl = uploadResult.PosterUrl;
+                    posterS3Key = uploadResult.PosterS3Key;
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
+            }
 
             var eventRequest = new EventCreationRequest
             {
-                EventTitle = request.EventTitle,
-                EventDescription = request.EventDescription,
-                Venue = request.Venue,
-                CategoryID = request.CategoryID,
-                ProposedStartDatetime = request.ProposedStartDatetime,
-                ProposedEndDatetime = request.ProposedEndDatetime,
-                RequestCapacity = request.RequestCapacity,
+                EventTitle = eventTitle,
+                EventDescription = eventDescription,
+                Venue = venue,
+                CategoryID = categoryID,
+                ProposedStartDatetime = proposedStartDatetime,
+                ProposedEndDatetime = proposedEndDatetime,
+                RequestCapacity = requestCapacity,
                 RequestStatus = "pending",
                 SubmittedBy = userId,
                 SubmittedAt = DateTime.Now,
                 ReviewedBy = null,
                 ReviewedAt = null,
                 Remark = null,
-                PosterURL = "",
-                PosterS3Key = null
+                PosterURL = posterUrl,
+                PosterS3Key = posterS3Key
             };
 
             _context.EventCreationRequests.Add(eventRequest);
@@ -142,5 +211,26 @@ namespace UniversityEventManager.API.Controllers
         public DateTime ProposedStartDatetime { get; set; }
         public DateTime ProposedEndDatetime { get; set; }
         public int RequestCapacity { get; set; }
+    }
+
+    public class CreateEventRequestWithPosterDto
+    {
+        [Required]
+        public string EventTitle { get; set; } = string.Empty;
+
+        public string? EventDescription { get; set; }
+
+        [Required]
+        public string Venue { get; set; } = string.Empty;
+
+        public long CategoryID { get; set; }
+
+        public DateTime ProposedStartDatetime { get; set; }
+
+        public DateTime ProposedEndDatetime { get; set; }
+
+        public int RequestCapacity { get; set; }
+
+        public IFormFile? PosterFile { get; set; }
     }
 }

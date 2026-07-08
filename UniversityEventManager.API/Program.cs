@@ -1,3 +1,6 @@
+using Amazon;
+using Amazon.S3;
+using UniversityEventManager.API.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -27,6 +30,14 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader();
     });
 });
+
+// AWS
+var s3Region = builder.Configuration["AWS:S3:Region"] ?? "ap-southeast-1";
+
+builder.Services.AddSingleton<IAmazonS3>(_ =>
+    new AmazonS3Client(RegionEndpoint.GetBySystemName(s3Region)));
+
+builder.Services.AddScoped<S3StorageService>();
 
 // Swagger + JWT Authorize button
 builder.Services.AddEndpointsApiExplorer();
