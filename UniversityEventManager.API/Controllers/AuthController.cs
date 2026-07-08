@@ -46,7 +46,7 @@ namespace UniversityEventManager.API.Controllers
                 SchoolID = request.SchoolID,
                 Email = request.Email,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-                Organisation = request.Organisation ?? "APU",
+                Organisation = "APU",
                 RoleID = userRole.RoleID,
                 AccountStatus = "active",
                 CreatedAt = DateTime.Now
